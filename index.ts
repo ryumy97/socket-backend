@@ -1,140 +1,161 @@
-import express from 'express';
-import cors from 'cors';
-import { createServer } from 'https';
-import { Server } from 'socket.io';
-import { v4 as uuid } from 'uuid';
-import fs from 'fs';
+import express from "express";
+import cors from "cors";
+import { createServer } from "https";
+import { Server } from "socket.io";
+import { v4 as uuid } from "uuid";
+import fs from "fs";
 
 const app = express();
 app.use(cors());
 
 const httpServer = createServer(
-    {
-        key: fs.readFileSync('localhost.key', 'utf8'),
-        cert: fs.readFileSync('localhost.crt', 'utf8'),
-    },
-    app
+  {
+    key: fs.readFileSync("key.pem", "utf8"),
+    cert: fs.readFileSync("cert.pem", "utf8"),
+  },
+  app
 );
 
 const io = new Server(httpServer, {
-    cors: {
-        origin: '*',
-        credentials: true,
-    },
+  cors: {
+    origin: "*",
+    credentials: true,
+  },
 });
 
 const generateId = () => {
-    return uuid();
+  return uuid();
 };
 
-io.of('/admin').on('connection', (socket) => {
-    console.log('a admin connected');
+io.of("/admin").on("connection", (socket) => {
+  console.log("a admin connected");
 
-    const roomId = generateId();
-    socket.join(roomId);
-    socket.emit('room-id', { id: generateId(), data: { roomId } });
+  const roomId = generateId();
+  socket.join(roomId);
+  socket.emit("room-id", { id: generateId(), data: { roomId } });
 });
 
-io.of('/user').on('connection', (socket) => {
-    console.log('a user connected');
+io.of("/user").on("connection", (socket) => {
+  const userId = generateId();
 
-    socket.on('set-room', async (roomData: { id: string }) => {
-        const { id } = roomData;
+  console.log("a user connected");
 
-        await socket.rooms.forEach(async (room) => {
-            await socket.leave(room);
-        });
+  socket.on("set-room", async (roomData: { id: string }) => {
+    const { id } = roomData;
 
-        console.log(`Room set - ${id}`);
-
-        socket['room-id'] = id;
-        socket.join(id);
-
-        let n = 0;
-        io.of('/user').sockets.forEach((s) => {
-            s.rooms.forEach((r) => {
-                n += r === id ? 1 : 0;
-            });
-        });
-
-        io.of('/admin')
-            .to(id)
-            .emit('room-user', {
-                id: generateId(),
-                data: { users: n },
-            });
+    await socket.rooms.forEach(async (room) => {
+      await socket.leave(room);
     });
 
-    socket.on('disconnect', async () => {
-        const id = socket['room-id'];
+    console.log(`Room set - ${id}`);
 
-        let n = 0;
+    socket["room-id"] = id;
+    socket.join(id);
 
-        io.of('/user').sockets.forEach((s) => {
-            s.rooms.forEach((r) => {
-                n += r === id ? 1 : 0;
-            });
-        });
-
-        io.of('/admin')
-            .to(id)
-            .emit('room-user', {
-                id: generateId(),
-                data: { users: n },
-            });
+    let n = 0;
+    io.of("/user").sockets.forEach((s) => {
+      s.rooms.forEach((r) => {
+        n += r === id ? 1 : 0;
+      });
     });
 
-    socket.on('mouse-location', (location: { x: number; y: number }) => {
-        socket['mouse-location'] = location;
+    io.of("/admin")
+      .to(id)
+      .emit("room-user", {
+        id: generateId(),
+        data: { users: n },
+      });
+  });
+
+  socket.on("disconnect", async () => {
+    const id = socket["room-id"];
+
+    let n = 0;
+
+    io.of("/user").sockets.forEach((s) => {
+      s.rooms.forEach((r) => {
+        n += r === id ? 1 : 0;
+      });
     });
 
-    socket.on(
-        'device-orientation',
-        (orientation: { x: number; y: number; z: number; w: number }) => {
-            socket['device-orientation'] = orientation;
-        }
-    );
+    io.of("/admin")
+      .to(id)
+      .emit("room-user", {
+        id: generateId(),
+        data: { users: n },
+      });
+  });
+
+  socket.on("mouse-location", (location: { x: number; y: number }) => {
+    socket["mouse-location"] = location;
+  });
+
+  socket.on(
+    "device-orientation",
+    (orientation: { x: number; y: number; z: number; w: number }) => {
+      socket["device-orientation"] = orientation;
+    }
+  );
+
+  socket.on("tap", () => {
+    if (!socket[`tap`]) {
+      socket[`tap`] = {};
+    }
+
+    const value = socket[`tap`][userId];
+
+    socket[`tap`][userId] = value ? value + 1 : 1;
+  });
 });
 
-app.get('/', async (req, res) => {
-    console.log('hello');
-    res.send('OK');
+app.get("/", async (req, res) => {
+  console.log("hello");
+  res.send("OK");
 });
 
-app.get('/room', async (req, res) => {
-    const rooms: Set<string>[] = [];
+app.get("/room", async (req, res) => {
+  const rooms: Set<string>[] = [];
 
-    io.of('/admin').sockets.forEach((socket) => {
-        rooms.push(socket.rooms);
-    });
+  io.of("/admin").sockets.forEach((socket) => {
+    rooms.push(socket.rooms);
+  });
 
-    const result = rooms.flatMap((room) => {
-        return [...room];
-    });
+  const result = rooms.flatMap((room) => {
+    return [...room];
+  });
 
-    res.send(result);
+  res.send(result);
 });
 
 setInterval(async () => {
-    io.of('/user').sockets.forEach((socket) => {
-        if (socket['mouse-location']) {
-            io.of('/admin')
-                .to([...socket.rooms.values()])
-                .emit('mouse-location', {
-                    id: generateId(),
-                    data: socket['mouse-location'],
-                });
-        }
+  io.of("/user").sockets.forEach((socket) => {
+    if (socket["mouse-location"]) {
+      io.of("/admin")
+        .to([...socket.rooms.values()])
+        .emit("mouse-location", {
+          id: generateId(),
+          data: socket["mouse-location"],
+        });
+    }
 
-        if (socket['device-orientation']) {
-            io.of('/admin')
-                .to([...socket.rooms.values()])
-                .emit('device-orientation', {
-                    id: generateId(),
-                    data: socket['device-orientation'],
-                });
-        }
-    });
+    if (socket["device-orientation"]) {
+      io.of("/admin")
+        .to([...socket.rooms.values()])
+        .emit("device-orientation", {
+          id: generateId(),
+          data: socket["device-orientation"],
+        });
+    }
+
+    if (socket["tap"]) {
+      io.of("/admin")
+        .to([...socket.rooms.values()])
+        .emit("tap", {
+          id: generateId(),
+          data: socket["tap"],
+        });
+    }
+  });
 }, 16);
 
 httpServer.listen(3001);
